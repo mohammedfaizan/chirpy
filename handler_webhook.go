@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 )
 
 type EventRequest struct {
@@ -17,6 +19,13 @@ type EventRequest struct {
 
 func (cfg *apiConfig) handlerWebhooks(w http.ResponseWriter, r *http.Request) {
 
+	apiKey := strings.TrimPrefix(r.Header.Get("Authorization"), "ApiKey ")
+
+	polkaKey := os.Getenv("POLKA_KEY")
+	if apiKey != polkaKey {
+		respondWithError(w, http.StatusUnauthorized, "hatt bey")
+		return
+	}
 	var req EventRequest
 
 	err := json.NewDecoder(r.Body).Decode(&req)
