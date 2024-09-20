@@ -3,6 +3,7 @@ package database
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -10,6 +11,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+var ErrNotExist = errors.New("resource doesn't exists")
 
 type DB struct {
 	path string
@@ -28,6 +31,7 @@ type User struct {
 	Password     string `json:"password"`
 	Token        string `json:"token"`
 	RefreshToken string `json:"refresh_token"`
+	IsChirpyRed  bool   `json:"is_chirpy_red"`
 }
 
 type RefreshToken struct {
@@ -37,8 +41,9 @@ type RefreshToken struct {
 }
 
 type Chirp struct {
-	ID   int    `json:"id"`
-	Body string `json:"body"`
+	ID       int    `json:"id"`
+	Body     string `json:"body"`
+	AuthorId int    `json:"author_id"`
 }
 
 func NewDB(path string) (*DB, error) {
@@ -50,7 +55,7 @@ func NewDB(path string) (*DB, error) {
 	return db, err
 }
 
-func (db *DB) CreateChirp(body string) (Chirp, error) {
+func (db *DB) CreateChirp(body string, userID int) (Chirp, error) {
 	dbStructure, err := db.loadDB()
 	if err != nil {
 		return Chirp{}, err
@@ -58,8 +63,9 @@ func (db *DB) CreateChirp(body string) (Chirp, error) {
 
 	id := len(dbStructure.Chirps) + 1
 	chirp := Chirp{
-		ID:   id,
-		Body: body,
+		ID:       id,
+		Body:     body,
+		AuthorId: userID,
 	}
 	dbStructure.Chirps[id] = chirp
 
@@ -69,6 +75,22 @@ func (db *DB) CreateChirp(body string) (Chirp, error) {
 	}
 
 	return chirp, nil
+}
+
+func (db *DB) DeleteChirp(id int) error {
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return err
+	}
+
+	delete(dbStructure.Chirps, id)
+
+	err = db.writeDB(dbStructure)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (db *DB) GetChirps() ([]Chirp, error) {
@@ -83,6 +105,20 @@ func (db *DB) GetChirps() ([]Chirp, error) {
 	}
 
 	return chirps, nil
+}
+
+func (db *DB) GetChirp(chirpID int) (Chirp, error) {
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return Chirp{}, err
+	}
+
+	chirp, ok := dbStructure.Chirps[chirpID]
+	if !ok {
+		return Chirp{}, errors.New("user doesn't exist")
+	}
+
+	return chirp, nil
 }
 
 func (db *DB) GetUsers() (map[int]User, error) {
@@ -143,7 +179,7 @@ func (db *DB) writeDB(dbStructure DBStructure) error {
 	return nil
 }
 
-func (db *DB) CreateUser(email, password string) (User, error) {
+func (db *DB) CreateUser(email, password string, ischirpyRed bool) (User, error) {
 	log.Printf("Creating user with email: %s", email)
 	dbStructure, err := db.loadDB()
 	if err != nil {
@@ -160,9 +196,10 @@ func (db *DB) CreateUser(email, password string) (User, error) {
 
 	id := len(dbStructure.Users) + 1
 	user := User{
-		ID:       id,
-		Email:    email,
-		Password: string(hashedPassword),
+		ID:          id,
+		Email:       email,
+		Password:    string(hashedPassword),
+		IsChirpyRed: ischirpyRed,
 	}
 	dbStructure.Users[id] = user
 
@@ -276,5 +313,41 @@ func (db *DB) GetUser(userID int) (User, error) {
 		return User{}, errors.New("user doesn't exist")
 	}
 
+	return user, nil
+}
+
+func (db *DB) GetUserByEmail(email string) (User, error) {
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return User{}, err
+	}
+
+	for _, user := range dbStructure.Users {
+		if user.Email == email {
+			return user, nil
+		}
+	}
+
+	return User{}, ErrNotExist
+}
+
+func (db *DB) UpgradeUserRed(userID int) (User, error) {
+
+	dbStructure, err := db.loadDB()
+	if err != nil {
+		return User{}, err
+	}
+
+	user, exists := dbStructure.Users[userID]
+	if !exists {
+		return User{}, fmt.Errorf("user with id doesn't exists")
+	}
+	user.IsChirpyRed = true
+	dbStructure.Users[userID] = user
+
+	err = db.writeDB(dbStructure)
+	if err != nil {
+		return User{}, err
+	}
 	return user, nil
 }
